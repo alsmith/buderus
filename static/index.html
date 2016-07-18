@@ -1,0 +1,291 @@
+<!doctype html>
+<html>
+<head>
+<title>Buderus GB192-25i</title>
+<script src="jquery.min.js"></script>
+<link rel="stylesheet" type="text/css" href="style.css">
+<script type="text/javascript" src="jquery.jqplot.min.js"></script>
+<script type="text/javascript" src="plugins/jqplot.dateAxisRenderer.js"></script>
+<script type="text/javascript" src="plugins/jqplot.pointLabels.js"></script>
+<link rel="stylesheet" type="text/css" href="jquery.jqplot.min.css">
+<link rel="stylesheet" type="text/css" href="style.css">
+<script>
+var solarTemps = null;
+var solarData = null;
+var heatingTemps = null;
+var systemData = null;
+
+var now = Date.now();
+var offset = 0;
+
+var refreshTimer = null;
+var refreshInterval = 30;
+
+function getAnchor() {
+  if (window.location.hash != null && window.location.hash.length > 0) {
+    anchor = window.location.hash;
+    if (anchor.startsWith('#')) {
+      anchor = anchor.slice(1);
+    }
+  } else {
+    anchor = null;
+  }
+  return anchor;
+}
+
+function setAnchor(anchor) {
+  window.location.hash = anchor;
+}
+
+function clearData(text) {
+  if (solarTemps != null) {
+    solarTemps.destroy();
+    solarTemps = null;
+  }
+  if (solarData != null) {
+    solarData.destroy();
+    solarData = null;
+  }
+  if (heatingTemps != null) {
+    heatingTemps.destroy();
+    heatingTemps = null;
+  }
+  if (systemData != null) {
+    systemData.destroy();
+    systemData = null;
+  }
+  $('#date').html('');
+  $('#solarTemps').html('');
+}
+
+function generateURL() {
+  var url = 'api/buderus/1.0/data';
+
+  anchor = getAnchor();
+  if (anchor != null) {
+    url += '?date='+anchor;
+    offset = dateToOffset(anchor);
+  }
+  return url;
+}
+
+function getLastValue(series) {
+  if (series == null || series.length == 0) {
+    return 0;
+  }
+  return series[series.length-1][1];
+}
+
+function displayData() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+
+  $.ajax({
+    dataType: 'json',
+    url: generateURL()
+  }).done(function(data) {
+    clearData();
+
+    if (Object.keys(data).length == 0) {
+      $('#solarTemps').html('No data to display');
+      return;
+    }
+
+    // Get last timestamp
+    firstSeries = data[Object.keys(data)[0]]
+    if (firstSeries.length > 0) {
+      $('#date').html(firstSeries[firstSeries.length-1][0]);
+    } else {
+      $('#date').html(offsetToDate(offset));
+    }
+
+    if (data['dhwCircuits.dhw1.temperatureLevels.high'] == null) {
+      data['dhwCircuits.dhw1.temperatureLevels.high'] = [[]];
+    }
+
+    solarTemps = $.jqplot('solarTemps', [data['dhwCircuits.dhw1.temperatureLevels.high'],
+                                         data['solarCircuits.sc1.collectorTemperature'],
+                                         data['system.sensors.temperatures.hotWater_t2'],
+                                         data['solarCircuits.sc1.dhwTankTemperature'],
+                                         data['system.sensors.temperatures.outdoor_t1']], {
+      title: 'Solar',
+      width: 800,
+      seriesDefaults: { 
+        showMarker: false,
+      },
+      legend: {
+        show: true,
+        placement: 'outside'
+      },
+      series: [ 
+        {label: 'Water setpoint ('+getLastValue(data['dhwCircuits.dhw1.temperatureLevels.high'])+'&deg;C)'},
+        {label: 'Solar collector ('+getLastValue(data['solarCircuits.sc1.collectorTemperature'])+'&deg;C)'},
+        {label: 'Upper tank (boiler) ('+getLastValue(data['system.sensors.temperatures.hotWater_t2'])+'&deg;C)'},
+        {label: 'Lower tank (solar) ('+getLastValue(data['solarCircuits.sc1.dhwTankTemperature'])+'&deg;C)'},
+        {label: 'Outside temperature ('+getLastValue(data['system.sensors.temperatures.outdoor_t1'])+'&deg;C)'}, // pointLabels: { show: true }
+      ],
+      axes: {
+        xaxis: {
+          renderer: $.jqplot.DateAxisRenderer
+        },
+      },
+    });
+
+    solarData = $.jqplot('solarData', [data['solarCircuits.sc1.pumpModulation'],
+                                       data['solarCircuits.sc1.solarYield']], {
+      width: 800,
+      seriesDefaults: { 
+        showMarker: false,
+      },
+      legend: {
+        show: true,
+        placement: 'outside'
+      },
+      series: [ 
+        {label: 'Solar pump output ('+getLastValue(data['solarCircuits.sc1.pumpModulation'])+'%)'},
+        {label: 'Solar yield ('+getLastValue(data['solarCircuits.sc1.solarYield'])+'Wh)'},
+      ],
+      axes: {
+        xaxis: {
+          renderer: $.jqplot.DateAxisRenderer
+        },
+        yaxis: {
+          min: 0
+        },
+      },
+    });
+
+    heatingTemps = $.jqplot('heatingTemps', [data['system.sensors.temperatures.supply_t1'],
+                                             data['system.sensors.temperatures.return'],
+                                             data['heatingCircuits.hc1.actualSupplyTemperature'],
+                                             data['heatingCircuits.hc1.temperatureLevels.comfort2'],
+                                             data['heatingCircuits.hc1.temperatureLevels.eco'],
+                                             data['heatingCircuits.hc1.roomtemperature'],
+                                             data['system.sensors.temperatures.outdoor_t1']], {
+      title: 'Heating',
+      width: 800,
+      seriesDefaults: { 
+        showMarker: false,
+      },
+      legend: {
+        show: true,
+        placement: 'outside'
+      },
+      series: [ 
+        {label: 'Boiler output ('+getLastValue(data['system.sensors.temperatures.supply_t1'])+'&deg;C)'},
+        {label: 'Boiler return ('+getLastValue(data['system.sensors.temperatures.return'])+'&deg;C)'},
+        {label: 'Heating supply ('+getLastValue(data['heatingCircuits.hc1.actualSupplyTemperature'])+'&deg;C)'},
+        {label: 'Day setpoint ('+getLastValue(data['heatingCircuits.hc1.temperatureLevels.eco'])+'&deg;C)'},
+        {label: 'Night setpoint ('+getLastValue(data['heatingCircuits.hc1.temperatureLevels.comfort2'])+'&deg;C)'},
+        {label: 'Room temperature ('+getLastValue(data['heatingCircuits.hc1.roomtemperature'])+'&deg;C)'},
+        {label: 'Outside temperature ('+getLastValue(data['system.sensors.temperatures.outdoor_t1'])+'&deg;C)'},
+      ],
+      axes: {
+        xaxis: {
+          renderer: $.jqplot.DateAxisRenderer
+        },
+      },
+    });
+
+    systemData = $.jqplot('systemData', [data['heatSources.actualPower'],
+                                         data['heatSources.actualCHPower'],
+                                         data['heatSources.actualDHWPower'],
+                                         data['heatSources.actualModulation'],
+                                         data['heatSources.flameStatus'],
+                                         data['dhwCircuits.dhw1.waterFlow'],
+                                         data['heatingCircuits.hc1.pumpModulation'],
+                                         data['heatSources.CHpumpModulation']], {
+      title: 'System',
+      width: 800,
+      seriesDefaults: { 
+        showMarker: false,
+      },
+      legend: {
+        show: true,
+        placement: 'outside'
+      },
+      series: [ 
+        {label: 'Total system output ('+getLastValue(data['heatSources.actualPower'])+'kW)'},
+        {label: 'Heating system ('+getLastValue(data['heatSources.actualCHPower'])+'kW)'},
+        {label: 'Hot water system ('+getLastValue(data['heatSources.actualDHWPower'])+'kW)'},
+        {label: 'Flame modulation ('+getLastValue(data['heatSources.actualModulation'])+'%)'},
+        {label: 'Flame status ('+getLastValue(data['heatSources.flameStatus'])+')'},
+        {label: 'Hot water flow ('+getLastValue(data['dhwCircuits.dhw1.waterFlow'])+'l/min)'},
+        {label: 'Boiler pump output ('+getLastValue(data['heatingCircuits.hc1.pumpModulation'])+'%)'},
+        {label: 'Heating pump output ('+getLastValue(data['heatSources.CHpumpModulation'])+'%)'},
+      ],
+      axes: {
+        xaxis: {
+          renderer: $.jqplot.DateAxisRenderer
+        },
+        yaxis: {
+          min: 0
+        },
+      },
+    });
+    refreshTimer = setInterval(displayData, refreshInterval * 1000);
+  }).fail(function(data) {
+    clearData();
+    $('#solarTemps').html('Error fetching data');
+    refreshTimer = setInterval(displayData, 1000);
+  });
+}
+
+function offsetToDate(offset) {
+    d = new Date(now+offset*86400*1000);
+    return d.toJSON().slice(0, 10);
+}
+
+function dateToOffset(date) {
+    var d = new Date(date);
+    var n = new Date(offsetToDate(0));
+    return (d-n)/1000/86400;
+}
+
+function updateButtons() {
+  $('#next').prop('disabled', (offset == 0));
+  if (offset == 0) {
+    $('#prev').text('Yesterday');
+    $('#next').text('Tomorrow');
+  } else if (offset == -1) {
+    $('#prev').text(offsetToDate(offset - 1));
+    $('#next').text('Today');
+  } else {
+    $('#prev').text(offsetToDate(offset - 1));
+    $('#next').text(offsetToDate(offset + 1));
+  }
+}
+
+$(document).ready(function(){
+  displayData();
+  updateButtons();
+
+  $('#prev').click(function() {
+    offset -= 1;
+    setAnchor(offsetToDate(offset));
+    updateButtons();
+    displayData();
+  });
+  $('#next').click(function() {
+    offset += 1;
+    setAnchor(offsetToDate(offset));
+    updateButtons();
+    displayData();
+  });
+});
+</script>
+</head>
+<body>
+<table id="nav" width="800">
+<tr><td width="200"><button id="prev">Yesterday</button></td><td align="center"><span id="date" class="jqplot-title"></span></td><td width="200" align="right"><button id="next" disabled>Tomorrow</button></td></tr>
+</table>
+<table id="graphs">
+<tr><td><div id="solarTemps"></td></tr>
+<tr><td><div id="solarData"></td></tr>
+<tr><td><div id="heatingTemps"></td></tr>
+<tr><td><div id="systemData"></td></tr>
+</table>
+</body>
+</html>

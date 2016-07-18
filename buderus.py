@@ -15,6 +15,7 @@ class Buderus():
         self.__content_type = "application/json"
         self._host = host
 
+        # This will need to be an array with 32 bytes total...
         salt = [ 0x00, 0x01, 0x02, ... ]
 
         bsalt = struct.pack('B' * len(salt), *salt)

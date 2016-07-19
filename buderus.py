@@ -6,6 +6,9 @@ import requests
 import struct
 from Crypto.Cipher import AES
 
+# Acknowledgements:
+# KM200 control code inspired by https://github.com/rthill/buderus
+
 class Buderus():
     INTERRUPT = '\1'
     PAD = '\0'

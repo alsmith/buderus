@@ -302,7 +302,7 @@ function dateToOffset(date) {
 }
 
 function updateButtons() {
-  $('#next').prop('disabled', (offset == 0));
+  $('#next').prop('disabled', (offset >= 0));
   if (offset == -1) {
     $('#prev').text(offsetToDate(offset - 1));
     $('#next').text('Today');

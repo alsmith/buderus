@@ -303,12 +303,15 @@ function dateToOffset(date) {
 
 function updateButtons() {
   $('#next').prop('disabled', (offset == 0));
-  if (offset == 0) {
-    $('#prev').text('Yesterday');
-    $('#next').text('Tomorrow');
-  } else if (offset == -1) {
+  if (offset == -1) {
     $('#prev').text(offsetToDate(offset - 1));
     $('#next').text('Today');
+  } else if (offset == 0) {
+    $('#prev').text('Yesterday');
+    $('#next').text('Tomorrow');
+  } else if (offset == 1) {
+    $('#prev').text('Today');
+    $('#next').text(offsetToDate(offset + 1));
   } else {
     $('#prev').text(offsetToDate(offset - 1));
     $('#next').text(offsetToDate(offset + 1));

@@ -90,6 +90,10 @@ function displaySolarData1() {
     data['dhwCircuits.dhw1.temperatureLevels.high'] = [[]];
   }
 
+  if (solarTemps != null) {
+    solarTemps.destroy();
+    solarTemps = null;
+  }
   solarTemps = $.jqplot('solarTemps', [data['dhwCircuits.dhw1.temperatureLevels.high'],
                                        data['solarCircuits.sc1.collectorTemperature'],
                                        data['system.sensors.temperatures.hotWater_t2'],
@@ -123,6 +127,10 @@ function displaySolarData1() {
 function displaySolarData2() {
   clearTimers();
 
+  if (solarData != null) {
+    solarData.destroy();
+    solarData = null;
+  }
   solarData = $.jqplot('solarData', [data['solarCircuits.sc1.pumpModulation'],
                                      data['solarCircuits.sc1.solarYield']], {
     width: 800,
@@ -152,6 +160,10 @@ function displaySolarData2() {
 function displayHeatingData() {
   clearTimers();
 
+  if (heatingTemps != null) {
+    heatingTemps.destroy();
+    heatingTemps = null;
+  }
   heatingTemps = $.jqplot('heatingTemps', [data['system.sensors.temperatures.supply_t1'],
                                            data['system.sensors.temperatures.return'],
                                            data['heatingCircuits.hc1.actualSupplyTemperature'],
@@ -172,8 +184,8 @@ function displayHeatingData() {
       {label: 'Boiler output ('+getLastValue(data['system.sensors.temperatures.supply_t1'])+'&deg;C)'},
       {label: 'Boiler return ('+getLastValue(data['system.sensors.temperatures.return'])+'&deg;C)'},
       {label: 'Heating supply ('+getLastValue(data['heatingCircuits.hc1.actualSupplyTemperature'])+'&deg;C)'},
-      {label: 'Day setpoint ('+getLastValue(data['heatingCircuits.hc1.temperatureLevels.eco'])+'&deg;C)'},
-      {label: 'Night setpoint ('+getLastValue(data['heatingCircuits.hc1.temperatureLevels.comfort2'])+'&deg;C)'},
+      {label: 'Day setpoint ('+getLastValue(data['heatingCircuits.hc1.temperatureLevels.comfort2'])+'&deg;C)'},
+      {label: 'Night setpoint ('+getLastValue(data['heatingCircuits.hc1.temperatureLevels.eco'])+'&deg;C)'},
       {label: 'Room temperature ('+getLastValue(data['heatingCircuits.hc1.roomtemperature'])+'&deg;C)'},
       {label: 'Outside temperature ('+getLastValue(data['system.sensors.temperatures.outdoor_t1'])+'&deg;C)'},
     ],
@@ -189,6 +201,10 @@ function displayHeatingData() {
 function displaySystemData() {
   clearTimers();
 
+  if (systemData != null) {
+    systemData.destroy();
+    systemData = null;
+  }
   systemData = $.jqplot('systemData', [data['heatSources.actualPower'],
                                        data['heatSources.actualCHPower'],
                                        data['heatSources.actualDHWPower'],
@@ -250,14 +266,13 @@ function displayData() {
     dataType: 'json',
     url: generateURL()
   }).done(function(d) {
-    clearData();
-
     data = d;
 
     if (Object.keys(data).length == 0) {
       $('#solarTemps').html('No data to display');
       return;
     }
+    $('#solarTemps').html('');
 
     // Get last timestamp
     firstSeries = data[Object.keys(data)[0]]

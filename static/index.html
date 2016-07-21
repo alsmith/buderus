@@ -62,7 +62,12 @@ function clearData(text) {
     systemData = null;
   }
   $('#date').html('');
-  $('#solarTemps').html('');
+  $('#status').html(text);
+  if (text == '') {
+    $('#statusRow').hide();
+  } else {
+    $('#statusRow').show();
+  }
 }
 
 function generateURL() {
@@ -76,11 +81,32 @@ function generateURL() {
   return url;
 }
 
-function getLastValue(series) {
+function summarise(series, unit) {
   if (series == null || series.length == 0) {
-    return 0;
+    stats = {cur: 0, min: 0, max: 0};
+  } else {
+    stats = {}
+    stats.cur = series[series.length-1][1];
+    stats.min = stats.max = series[0][1];
+    series.forEach(function(value, index, array) {
+      if (value[1] < stats.min) {
+        stats.min = value[1];
+      }
+      if (value[1] > stats.max) {
+        stats.max = value[1];
+      }
+    });
   }
-  return series[series.length-1][1];
+
+  text = '('+stats.cur+unit;
+  if (stats.min < stats.cur) {
+    text += ', low '+stats.min+unit;
+  }
+  if (stats.max > stats.cur) {
+    text += ', high '+stats.max+unit;
+  }
+  text += ')'
+  return text;
 }
 
 function displaySolarData1() {
@@ -109,11 +135,11 @@ function displaySolarData1() {
       placement: 'outside'
     },
     series: [ 
-      {label: 'Water setpoint ('+getLastValue(data['dhwCircuits.dhw1.temperatureLevels.high'])+'&deg;C)'},
-      {label: 'Solar collector ('+getLastValue(data['solarCircuits.sc1.collectorTemperature'])+'&deg;C)'},
-      {label: 'Upper tank (boiler) ('+getLastValue(data['system.sensors.temperatures.hotWater_t2'])+'&deg;C)'},
-      {label: 'Lower tank (solar) ('+getLastValue(data['solarCircuits.sc1.dhwTankTemperature'])+'&deg;C)'},
-      {label: 'Outside temperature ('+getLastValue(data['system.sensors.temperatures.outdoor_t1'])+'&deg;C)'}, // pointLabels: { show: true }
+      {label: 'Water setpoint '+summarise(data['dhwCircuits.dhw1.temperatureLevels.high'], '&deg;C')},
+      {label: 'Solar collector '+summarise(data['solarCircuits.sc1.collectorTemperature'], '&deg;C')},
+      {label: 'Upper tank (boiler) '+summarise(data['system.sensors.temperatures.hotWater_t2'], '&deg;C')},
+      {label: 'Lower tank (solar) '+summarise(data['solarCircuits.sc1.dhwTankTemperature'], '&deg;C')},
+      {label: 'Outside temperature '+summarise(data['system.sensors.temperatures.outdoor_t1'], '&deg;C')}, // pointLabels: { show: true }
     ],
     axes: {
       xaxis: {
@@ -142,8 +168,8 @@ function displaySolarData2() {
       placement: 'outside'
     },
     series: [ 
-      {label: 'Solar pump output ('+getLastValue(data['solarCircuits.sc1.pumpModulation'])+'%)'},
-      {label: 'Solar yield ('+getLastValue(data['solarCircuits.sc1.solarYield'])+'Wh)'},
+      {label: 'Solar pump output '+summarise(data['solarCircuits.sc1.pumpModulation'], '%')},
+      {label: 'Solar yield '+summarise(data['solarCircuits.sc1.solarYield'], 'Wh')},
     ],
     axes: {
       xaxis: {
@@ -181,13 +207,13 @@ function displayHeatingData() {
       placement: 'outside'
     },
     series: [ 
-      {label: 'Boiler output ('+getLastValue(data['system.sensors.temperatures.supply_t1'])+'&deg;C)'},
-      {label: 'Boiler return ('+getLastValue(data['system.sensors.temperatures.return'])+'&deg;C)'},
-      {label: 'Heating supply ('+getLastValue(data['heatingCircuits.hc1.actualSupplyTemperature'])+'&deg;C)'},
-      {label: 'Day setpoint ('+getLastValue(data['heatingCircuits.hc1.temperatureLevels.comfort2'])+'&deg;C)'},
-      {label: 'Night setpoint ('+getLastValue(data['heatingCircuits.hc1.temperatureLevels.eco'])+'&deg;C)'},
-      {label: 'Room temperature ('+getLastValue(data['heatingCircuits.hc1.roomtemperature'])+'&deg;C)'},
-      {label: 'Outside temperature ('+getLastValue(data['system.sensors.temperatures.outdoor_t1'])+'&deg;C)'},
+      {label: 'Boiler output '+summarise(data['system.sensors.temperatures.supply_t1'], '&deg;C')},
+      {label: 'Boiler return '+summarise(data['system.sensors.temperatures.return'], '&deg;C')},
+      {label: 'Heating supply '+summarise(data['heatingCircuits.hc1.actualSupplyTemperature'], '&deg;C')},
+      {label: 'Day setpoint '+summarise(data['heatingCircuits.hc1.temperatureLevels.comfort2'], '&deg;C')},
+      {label: 'Night setpoint '+summarise(data['heatingCircuits.hc1.temperatureLevels.eco'], '&deg;C')},
+      {label: 'Room temperature '+summarise(data['heatingCircuits.hc1.roomtemperature'], '&deg;C')},
+      {label: 'Outside temperature '+summarise(data['system.sensors.temperatures.outdoor_t1'], '&deg;C')},
     ],
     axes: {
       xaxis: {
@@ -223,14 +249,14 @@ function displaySystemData() {
       placement: 'outside'
     },
     series: [ 
-      {label: 'Total system output ('+getLastValue(data['heatSources.actualPower'])+'kW)'},
-      {label: 'Heating system ('+getLastValue(data['heatSources.actualCHPower'])+'kW)'},
-      {label: 'Hot water system ('+getLastValue(data['heatSources.actualDHWPower'])+'kW)'},
-      {label: 'Flame modulation ('+getLastValue(data['heatSources.actualModulation'])+'%)'},
-      {label: 'Flame status ('+getLastValue(data['heatSources.flameStatus'])+')'},
-      {label: 'Hot water flow ('+getLastValue(data['dhwCircuits.dhw1.waterFlow'])+'l/min)'},
-      {label: 'Boiler pump output ('+getLastValue(data['heatingCircuits.hc1.pumpModulation'])+'%)'},
-      {label: 'Heating pump output ('+getLastValue(data['heatSources.CHpumpModulation'])+'%)'},
+      {label: 'Total system output '+summarise(data['heatSources.actualPower'], 'kW')},
+      {label: 'Heating system '+summarise(data['heatSources.actualCHPower'], 'kW')},
+      {label: 'Hot water system '+summarise(data['heatSources.actualDHWPower'], 'kW')},
+      {label: 'Flame modulation '+summarise(data['heatSources.actualModulation'], '%')},
+      {label: 'Flame status '+summarise(data['heatSources.flameStatus'], '')},
+      {label: 'Hot water flow '+summarise(data['dhwCircuits.dhw1.waterFlow'], 'l/min')},
+      {label: 'Boiler pump output '+summarise(data['heatingCircuits.hc1.pumpModulation'], '%')},
+      {label: 'Heating pump output '+summarise(data['heatSources.CHpumpModulation'], '%')},
     ],
     axes: {
       xaxis: {
@@ -269,10 +295,11 @@ function displayData() {
     data = d;
 
     if (Object.keys(data).length == 0) {
-      $('#solarTemps').html('No data to display');
+      clearData('No data to display');
       return;
     }
-    $('#solarTemps').html('');
+    $('#status').html('');
+    $('#statusRow').hide();
 
     // Get last timestamp
     firstSeries = data[Object.keys(data)[0]]
@@ -284,8 +311,7 @@ function displayData() {
 
     solarTimer1 = setInterval(displaySolarData1, graphInterval);
   }).fail(function(data) {
-    clearData();
-    $('#solarTemps').html('Error fetching data');
+    clearData('Error fetching data');
     refreshTimer = setInterval(displayData, 1000);
   });
 }
@@ -324,13 +350,23 @@ $(document).ready(function(){
 
   $('#prev').click(function() {
     offset -= 1;
-    setAnchor(offsetToDate(offset));
+    if (offset == 0) {
+      setAnchor('');
+    } else {
+      setAnchor(offsetToDate(offset));
+    }
+    clearData('Fetching data...');
     updateButtons();
     displayData();
   });
   $('#next').click(function() {
     offset += 1;
-    setAnchor(offsetToDate(offset));
+    if (offset == 0) {
+      setAnchor('');
+    } else {
+      setAnchor(offsetToDate(offset));
+    }
+    clearData('Fetching data...');
     updateButtons();
     displayData();
   });
@@ -342,10 +378,13 @@ $(document).ready(function(){
 <tr><td width="200"><button id="prev">Yesterday</button></td><td align="center"><span id="date" class="jqplot-title"></span></td><td width="200" align="right"><button id="next" disabled>Tomorrow</button></td></tr>
 </table>
 <table id="graphs">
+<tr id="statusRow"><td><span id="status">Fetching data...</span></td></tr>
 <tr><td><div id="solarTemps"></td></tr>
 <tr><td><div id="solarData"></td></tr>
 <tr><td><div id="heatingTemps"></td></tr>
 <tr><td><div id="systemData"></td></tr>
 </table>
+<hr>
+<font size="-2"><a href="https://github.com/alsmith/buderus" target="_blank">Source code</a></font>
 </body>
 </html>

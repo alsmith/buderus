@@ -41,27 +41,33 @@ class API():
                 skip = 4
 
             with helpers.DatabaseCursor() as cursor:
-                cursor.execute('SELECT DISTINCT nameId, name FROM buderusData, buderusKeys WHERE DATE(timestamp) = DATE(%s) AND buderusKeys.id = buderusData.nameId' % date)
-                nodes = cursor.fetchall()
+                cursor.execute('SELECT timestamp,name,value FROM buderusTimestamps, buderusKeys, buderusData WHERE DATE(timestamp) = DATE(%s) AND buderusTimestamps.id = buderusData.timestampId AND buderusKeys.id = buderusData.keyId ORDER BY TIMESTAMP ASC' % date)
+                rows = cursor.fetchall()
                 rc = {}
-                for node in nodes:
-                    rc[node['name']] = []
-                    cursor.execute('SELECT timestamp,value FROM buderusData WHERE DATE(timestamp) = DATE(%s) AND nameId = %%s ORDER BY TIMESTAMP ASC' % date, (node['nameId'],))
+                for row in cursor:
+                    if row['name'] not in rc:
+                        rc[row['name']] = []
+                    if row['value'] == 'off':
+                        value = 0
+                    elif row['value'] == 'on':
+                        value = 100
+                    else:
+                        try:
+                            value = ast.literal_eval(row['value'])
+                        except:
+                            value = row['value']
+                    rc[row['name']].append([row['timestamp'], value])
+
+            if skip != 1:
+                for series in rc.keys():
+                    newSeries = []
                     count = 0
-                    for row in cursor:
-                        if row['value'] == 'off':
-                            value = 0
-                        elif row['value'] == 'on':
-                            value = 100
-                        else:
-                            try:
-                                value = ast.literal_eval(row['value'])
-                            except:
-                                value = row['value']
+                    for dataPoint in rc[series]:
                         if count % skip == 0:
-                            rc[node['name']].append([row['timestamp'], value])
+                            newSeries.append(dataPoint)
                         count += 1
-                return rc
+                    rc[series] = newSeries
+            return rc
 
     def __init__(self):
         self.data = self.Data(self)
@@ -119,10 +125,16 @@ class API():
                 ]
 
         with helpers.DatabaseCursor(maxErrors=None) as cursor:
+            cursor.execute('INSERT INTO buderusTimestamps () VALUES()')
+            timestampId = cursor.lastrowid()
+
             cursor.execute('SELECT * FROM buderusKeys')
             keyNames = cursor.fetchall()
             for node in nodes:
-                data = json.loads(self.buderus.get_data(node))
+                jsonText = self.buderus.get_data(node)
+                if not jsonText:
+                    continue
+                data = json.loads(jsonText)
                 data['id'] = data['id'].lstrip('/').replace('/', '.')
 
                 keyName = filter(lambda k: k['name'] == data['id'], keyNames)
@@ -132,7 +144,7 @@ class API():
                 else:
                     keyId = keyName[0]['id']
 
-                cursor.execute('INSERT INTO buderusData (nameId, value) VALUES(%s, %s)', (keyId, data['value']))
+                cursor.execute('INSERT INTO buderusData (timestampId, keyId, value) VALUES(%s, %s, %s)', (timestampId, keyId, data['value']))
             cursor.execute('COMMIT')
 
 def main():

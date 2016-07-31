@@ -1,7 +1,7 @@
 <!doctype html>
 <html>
 <head>
-<title>Buderus GB192-25i</title>
+<title>Buderus GB192-25i H</title>
 <script src="jquery.min.js"></script>
 <link rel="stylesheet" type="text/css" href="style.css">
 <script type="text/javascript" src="jquery.jqplot.min.js"></script>
@@ -68,6 +68,7 @@ function clearData(text) {
   } else {
     $('#statusRow').show();
   }
+  $('#graphs').hide();
 }
 
 function generateURL() {
@@ -112,6 +113,7 @@ function summarise(series, unit) {
 function displaySolarData1() {
   clearTimers();
 
+  $('#graphs').show();
   if (data['dhwCircuits.dhw1.temperatureLevels.high'] == null) {
     data['dhwCircuits.dhw1.temperatureLevels.high'] = [[]];
   }
@@ -378,7 +380,7 @@ $(document).ready(function(){
 <tr><td width="200"><button id="prev">Yesterday</button></td><td align="center"><span id="date" class="jqplot-title"></span></td><td width="200" align="right"><button id="next" disabled>Tomorrow</button></td></tr>
 <tr id="statusRow"><td><span id="status">Fetching data...</span></td></tr>
 </table>
-<table id="graphs">
+<table id="graphs" style="display: none">
 <tr><td><div id="solarTemps"></td></tr>
 <tr><td><div id="solarData"></td></tr>
 <tr><td><div id="heatingTemps"></td></tr>

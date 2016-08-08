@@ -11,7 +11,6 @@ import re
 import socket
 import time
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 import helpers
 
 class Root():
@@ -21,42 +20,64 @@ class API():
     class Data():
         def __init__(self, api):
             self.api = api
-            self.POST = helpers.notImplemented
+            self.GET = helpers.notImplemented
             self.PUT = helpers.notImplemented
             self.DELETE = helpers.notImplemented
 
+        @cherrypy.tools.json_in()
         @cherrypy.tools.json_out(handler=helpers.dumper)
-        def GET(self, **kwargs):
-            if 'date' in kwargs:
-                m = re.match('\A(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})\Z', kwargs['date'])
+        def POST(self):
+            #(user, readonly) = helpers.authorisedUser()
+            #if not user:
+            #    raise cherrypy.HTTPError(403)
+
+            criteria = cherrypy.request.json
+
+            if 'date' in criteria:
+                m = re.match('\A(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})\Z', criteria['date'])
                 if not m:
                     raise cherrypy.HTTPError(400)
-                date = "'%s'" % kwargs['date']
+                date = datetime.datetime(year=m.group('year'), month=m.group('month'), day=m.group('day'))
             else:
-                date = 'CURRENT_TIMESTAMP()'
+                date = datetime.datetime.now()
+
+            if 'dayKeys' in criteria and not isinstance(criteria['dayKeys'], list):
+                raise cherrypy.HTTPError(400)
+
+            if 'yearKeys' in criteria and not isinstance(criteria['yearKeys'], list):
+                raise cherrypy.HTTPError(400)
 
             skip = 1
             ua = cherrypy.request.headers.get('User-Agent', '').strip()
             if 'BlackBerry' in ua:
                 skip = 4
 
+            rc = {}
             with helpers.DatabaseCursor() as cursor:
-                cursor.execute('SELECT timestamp,name,value FROM buderusTimestamps, buderusKeys, buderusData WHERE DATE(timestamp) = DATE(%s) AND buderusTimestamps.id = buderusData.timestampId AND buderusKeys.id = buderusData.keyId ORDER BY TIMESTAMP ASC' % date)
-                rows = cursor.fetchall()
-                rc = {}
-                for row in cursor:
-                    if row['name'] not in rc:
-                        rc[row['name']] = []
-                    if row['value'] == 'off':
-                        value = 0
-                    elif row['value'] == 'on':
-                        value = 100
-                    else:
-                        try:
-                            value = ast.literal_eval(row['value'])
-                        except:
-                            value = row['value']
-                    rc[row['name']].append([row['timestamp'], value])
+                if 'dayKeys' in criteria:
+                    cursor.execute('SELECT timestamp, name, value FROM buderusTimestamps, buderusKeys, buderusData WHERE DATE(timestamp) = DATE(%s) AND name IN %s AND buderusTimestamps.id = buderusData.timestampId AND buderusKeys.id = buderusData.keyId ORDER BY timestamp ASC', (date, criteria['dayKeys']))
+                    for row in cursor:
+                        if row['name'] not in rc:
+                            rc[row['name']] = []
+                        rc[row['name']].append([row['timestamp'], API.formatValue(row['value'])])
+
+                if 'yearKeys' in criteria:
+                    cursor.execute('SELECT DATE(timestamp) AS timestamp, name, MIN(value) AS min, MAX(value) AS max FROM buderusTimestamps, buderusKeys, buderusData WHERE YEAR(timestamp) = YEAR(%s) AND name IN %s AND buderusTimestamps.id = buderusData.timestampId AND buderusKeys.id = buderusData.keyId GROUP BY name, DATE(timestamp) ORDER BY name, DATE(timestamp) ASC', (date, criteria['yearKeys']))
+                    lastValue = None
+                    for row in cursor:
+                        minKey = '%s.min' % row['name']
+                        maxKey = '%s.max' % row['name']
+                        deltaKey = '%s.delta' % row['name']
+                        for k in [minKey, maxKey, deltaKey]:
+                            if k not in rc:
+                                rc[k] = []
+                        minValue = API.formatValue(row['min'])
+                        maxValue = API.formatValue(row['max'])
+                        rc[minKey].append([row['timestamp'], minValue])
+                        rc[maxKey].append([row['timestamp'], maxValue])
+                        if lastValue:
+                            rc[deltaKey].append([row['timestamp'], maxValue-lastValue])
+                        lastValue = maxValue
 
             if skip != 1:
                 for series in rc.keys():
@@ -76,8 +97,24 @@ class API():
         self.buderus = buderus.Buderus(host=cherrypy.config.get('buderus.host'), userPassword=cherrypy.config.get('buderus.userPassword'), gatewayPassword=cherrypy.config.get('buderus.gatewayPassword'))
 
     @staticmethod
+    def formatValue(value):
+        if value == 'off':
+            return 0
+        elif value == 'on':
+            return 100
+        else:
+            try:
+                return ast.literal_eval(value)
+            except:
+                return value
+
+    @staticmethod
     def databaseParameters():
-        return {'parameters': {'user': cherrypy.config['database.username'], 'passwd': cherrypy.config['database.password'], 'db': cherrypy.config['database.name'], 'host': cherrypy.config['database.host'], 'charset': 'utf8'}}
+        return {'parameters': {'user':    cherrypy.config['database.user'],
+                               'passwd':  cherrypy.config['database.password'],
+                               'db':      cherrypy.config['database.name'],
+                               'host':    cherrypy.config['database.host'],
+                               'charset': cherrypy.config['database.charset']}}
 
     @staticmethod
     def assignDatabaseParameters(threadIndex):
@@ -145,7 +182,6 @@ class API():
                     keyId = keyName[0]['id']
 
                 cursor.execute('INSERT INTO buderusData (timestampId, keyId, value) VALUES(%s, %s, %s)', (timestampId, keyId, data['value']))
-            cursor.execute('COMMIT')
 
 def main():
     parser = optparse.OptionParser(usage='usage: %s' % os.path.basename(__file__))

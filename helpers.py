@@ -14,6 +14,8 @@ def dumper(*args, **kwargs):
     def helper(obj):
         if isinstance(obj, datetime.datetime):
             return obj.isoformat().replace('T', ' ')
+        elif isinstance(obj, datetime.date):
+            return obj.isoformat()
         return None
 
     value = cherrypy.serving.request._json_inner_handler(*args, **kwargs)

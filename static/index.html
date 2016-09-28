@@ -8,7 +8,6 @@
 <script type="text/javascript" src="plugins/jqplot.dateAxisRenderer.js"></script>
 <script type="text/javascript" src="plugins/jqplot.pointLabels.js"></script>
 <link rel="stylesheet" type="text/css" href="jquery.jqplot.min.css">
-<link rel="stylesheet" type="text/css" href="style.css">
 <script>
 var solarTemps = null;
 var solarData = null;
@@ -20,14 +19,14 @@ var data = null;
 var offset = 0;
 
 var refreshTimer = null;
-var refreshInterval = 30;
+var refreshInterval = 60;
 
 var solarTimer1 = null;
 var solarTimer2 = null;
 var heatingTimer = null;
 var systemTimer = null;
 var annualTimer = null;
-var graphInterval = 100;
+var graphInterval = 200;
 
 var solarTable1 =  [{key: 'dhwCircuits.dhw1.temperatureLevels.high',        label: 'Water setpoint',      unit: '&deg;C'},
                     {key: 'solarCircuits.sc1.collectorTemperature',         label: 'Solar collector',     unit: '&deg;C'},
@@ -35,8 +34,8 @@ var solarTable1 =  [{key: 'dhwCircuits.dhw1.temperatureLevels.high',        labe
                     {key: 'solarCircuits.sc1.dhwTankTemperature',           label: 'Lower tank (solar)',  unit: '&deg;C'},
                     {key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature', unit: '&deg;C'}];
 
-var solarTable2 =  [{key: 'solarCircuits.sc1.pumpModulation',               label: 'Solar pump output',   unit: '%'},
-                    {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield',         unit: 'Wh'}];
+var solarTable2 =  [{key: 'solarCircuits.sc1.pumpModulation',               label: 'Solar pump output',   unit: '%',  gfactor: 100,  sfactor: 1},
+                    {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield',         unit: 'kW', gfactor: 1000, sfactor: 1000}];
 
 var heatingTable = [{key: 'system.sensors.temperatures.supply_t1',          label: 'Boiler output',       unit: '&deg;C'},
                     {key: 'system.sensors.temperatures.return',             label: 'Boiler return',       unit: '&deg;C'},
@@ -52,11 +51,13 @@ var systemTable =  [{key: 'heatSources.actualPower',                        labe
                     {key: 'heatSources.actualModulation',                   label: 'Flame modulation',    unit: '%'},
                     {key: 'heatSources.flameStatus',                        label: 'Flame status',        unit: ''},
                     {key: 'dhwCircuits.dhw1.waterFlow',                     label: 'Hot water flow',      unit: 'l/min'},
-                    {key: 'heatingCircuits.hc1.pumpModulation',             label: 'Boiler pump output',  unit: '%'},
-                    {key: 'heatSources.CHpumpModulation',                   label: 'Heating pump output', unit: '%'}];
-var annualTable =  [{key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature', unit: '&deg;C', min: true, max: true             },
-                    {key: 'heatSources.systemPressure',                     label: 'System pressure',     unit: 'bar',               max: true             },
-                    {key: 'heatSources.numberOfStarts',                     label: 'Burner starts',       unit: '',                             delta: true}];
+                    {key: 'heatingCircuits.hc1.pumpModulation',             label: 'Boiler pump output', unit: '%'},
+                    {key: 'heatSources.CHpumpModulation',                   label: 'Radiator pump output', unit: '%'}];
+
+var annualTable =  [{key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature', unit: '&deg;C', min: true, max: true},
+                    {key: 'heatSources.systemPressure',                     label: 'System pressure',     unit: 'bar',    min: true},
+                    {key: 'heatSources.numberOfStarts',                     label: 'Daily burner starts', unit: '',       delta: true},
+                    {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield',         unit: 'kWh',    sum: true, gfactor: 1000, sfactor: 1000}];
 
 function getAnchor() {
   if (window.location.hash != null && window.location.hash.length > 0) {
@@ -105,29 +106,36 @@ function clearData(text) {
   $('#graphs').hide();
 }
 
-function summarise(series, unit) {
+function formatNumber(i) {
+  return Math.round(i * 100) / 100;
+}
+
+function summarise(series, unit, factor) {
+  if (factor == undefined) {
+    factor = 1;
+  }
   if (series == null || series.length == 0) {
     stats = {cur: 0, min: 0, max: 0};
   } else {
     stats = {}
-    stats.cur = series[series.length-1][1];
-    stats.min = stats.max = series[0][1];
+    stats.cur = series[series.length-1][1]/factor;
+    stats.min = stats.max = series[0][1]/factor;
     series.forEach(function(value, index, array) {
-      if (value[1] < stats.min) {
-        stats.min = value[1];
+      if (value[1]/factor < stats.min) {
+        stats.min = value[1]/factor;
       }
-      if (value[1] > stats.max) {
-        stats.max = value[1];
+      if (value[1]/factor > stats.max) {
+        stats.max = value[1]/factor;
       }
     });
   }
 
-  text = '('+stats.cur+unit;
+  text = '('+formatNumber(stats.cur)+unit;
   if (stats.min < stats.cur) {
-    text += ', low '+stats.min+unit;
+    text += ', low '+formatNumber(stats.min)+unit;
   }
   if (stats.max > stats.cur) {
-    text += ', high '+stats.max+unit;
+    text += ', high '+formatNumber(stats.max)+unit;
   }
   text += ')'
   return text;
@@ -140,18 +148,25 @@ function getKeys(table) {
 function getData(table, data) {
   var rc = [];
   table.forEach(function(i) {
-    if (i.min || i.max || i.delta) {
+    var factor = i.gfactor;
+    if (factor == undefined) {
+      factor = 1;
+    }
+    if (i.max || i.min || i.delta || i.sum) {
       if (i.max) {
-        rc.push(data[i.key+'.max']);
+        rc.push(data[i.key+'.max'].map(function(t) { return [t[0], t[1]/factor];}));
       }
       if (i.min) {
-        rc.push(data[i.key+'.min']);
+        rc.push(data[i.key+'.min'].map(function(t) { return [t[0], t[1]/factor];}));
       }
       if (i.delta) {
-        rc.push(data[i.key+'.delta']);
+        rc.push(data[i.key+'.delta'].map(function(t) { return [t[0], t[1]/factor];}));
+      }
+      if (i.sum) {
+        rc.push(data[i.key+'.sum'].map(function(t) { return [t[0], t[1]/factor];}));
       }
     } else {
-      rc.push(data[i.key]);
+      rc.push(data[i.key].map(function(t) { return [t[0], t[1]/factor];}));
     }
   });
   return rc;
@@ -160,18 +175,22 @@ function getData(table, data) {
 function getLabels(table, data) {
   var rc = [];
   table.forEach(function(i) {
-    if (i.min || i.max || i.delta) {
+    var factor = i.sfactor;
+    if (i.max || i.min || i.delta || i.sum) {
       if (i.max) {
-        rc.push({label: 'Maximum '+i.label.toLowerCase()+' '+summarise(data[i.key+'.max'], i.unit)});
+        rc.push({label: 'Maximum '+i.label.toLowerCase()+' '+summarise(data[i.key+'.max'], i.unit, factor)});
       }
       if (i.min) {
-        rc.push({label: 'Minimum '+i.label.toLowerCase()+' '+summarise(data[i.key+'.min'], i.unit)});
+        rc.push({label: 'Minimum '+i.label.toLowerCase()+' '+summarise(data[i.key+'.min'], i.unit, factor)});
       }
       if (i.delta) {
-        rc.push({label: i.label+' '+summarise(data[i.key+'.delta'], i.unit)});
+        rc.push({label: i.label+' '+summarise(data[i.key+'.delta'], i.unit, factor)});
+      }
+      if (i.sum) {
+        rc.push({label: i.label+' '+summarise(data[i.key+'.sum'], i.unit, factor)});
       }
     } else {
-      rc.push({label: i.label+' '+summarise(data[i.key], i.unit)});
+      rc.push({label: i.label+' '+summarise(data[i.key], i.unit, factor)});
     }
   });
   return rc;
@@ -302,7 +321,7 @@ function displayAnnualData() {
     annualData = null;
   }
   annualData = $.jqplot('annualData', getData(annualTable, data), {
-    title: 'Annual summary',
+    title: 'Annual Summary',
     width: 800,
     seriesDefaults: { 
       showMarker: false,
@@ -321,7 +340,9 @@ function displayAnnualData() {
       },
     },
   });
-  refreshTimer = setInterval(displayData, refreshInterval * 1000);
+  if (offset == 0) {
+    refreshTimer = setInterval(displayData, refreshInterval * 1000);
+  }
 }
 
 function clearTimer(timer) {
@@ -367,7 +388,9 @@ function displayData() {
   }).done(function(d) {
     data = d;
 
-    if (Object.keys(data).length == 0) {
+    firstSeries = data[solarTable1[0].key];
+
+    if (!firstSeries || firstSeries.length == 0) {
       clearData('No data to display');
       return;
     }
@@ -375,15 +398,15 @@ function displayData() {
     $('#statusRow').hide();
 
     // Get last timestamp
-    firstSeries = data[Object.keys(data)[0]]
-    if (firstSeries.length > 0) {
+    if (offset == 0 && firstSeries && firstSeries.length > 0) {
       $('#date').html(firstSeries[firstSeries.length-1][0]);
     } else {
       $('#date').html(offsetToDate(offset));
     }
 
     solarTimer1 = setInterval(displaySolarData1, graphInterval);
-  }).fail(function(data) {
+  }).fail(function(jqXHR, textStatus, errorThrown) {
+    console.log(jqXHR.status);
     clearData('Error fetching data');
     refreshTimer = setInterval(displayData, 1000);
   });

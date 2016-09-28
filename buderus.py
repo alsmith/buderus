@@ -14,7 +14,7 @@ class Buderus():
     PAD = '\0'
 
     def __init__(self, host, userPassword, gatewayPassword):
-        self.__ua = "TeleHeater/2.2.3"
+        self.__ua = "TeleHeater"
         self.__content_type = "application/json"
         self._host = host
 

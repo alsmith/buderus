@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+<title>Buderus GB192-25i H</title>
+<script src="jquery.min.js"></script>
+<link rel="stylesheet" type="text/css" href="style.css">
+<script>
+
+var keys = [{key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature'},
+
+            {key: 'solarCircuits.sc1.collectorTemperature',         label: 'Solar collector'},
+            {key: 'system.sensors.temperatures.hotWater_t2',        label: 'Upper tank (boiler)'},
+            {key: 'solarCircuits.sc1.dhwTankTemperature',           label: 'Lower tank (solar)'},
+
+            {key: 'solarCircuits.sc1.pumpModulation',               label: 'Solar pump output'},
+            {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield'},
+
+            {key: 'system.sensors.temperatures.supply_t1',          label: 'Boiler output'},
+            {key: 'system.sensors.temperatures.return',             label: 'Boiler return'},
+            {key: 'heatingCircuits.hc1.actualSupplyTemperature',    label: 'Heating supply'},
+            {key: 'heatingCircuits.hc1.temperatureLevels.comfort2', label: 'Day setpoint'},
+            {key: 'heatingCircuits.hc1.temperatureLevels.eco',      label: 'Night setpoint'},
+            {key: 'heatingCircuits.hc1.roomtemperature',            label: 'Room temperature'},
+
+            {key: 'heatSources.actualPower',                        label: 'Total system output'},
+            {key: 'heatSources.actualCHPower',                      label: 'Heating system'},
+            {key: 'heatSources.actualDHWPower',                     label: 'Hot water system'},
+            {key: 'heatSources.actualModulation',                   label: 'Flame modulation'},
+            {key: 'heatSources.flameStatus',                        label: 'Flame status'},
+            {key: 'dhwCircuits.dhw1.waterFlow',                     label: 'Hot water flow'},
+            {key: 'heatingCircuits.hc1.pumpModulation',             label: 'Heating pump output'},
+            {key: 'heatSources.CHpumpModulation',                   label: 'Overall pump output'},
+];
+
+$(document).ready(function(){
+  $.ajax({
+    url: 'api/buderus/1.0/data',
+    method: 'GET',
+    contentType: 'application/json',
+  }).done(function(data) {
+    var table = document.createElement('table');
+    var tr = document.createElement('tr');
+    var td = document.createElement('td');
+
+    $(table).css('border', 1);
+    $(td).html(data.timestamp);
+    $(td).attr('colspan', 2);
+    $(td).css('text-align', 'center');
+    $(tr).append(td);
+    $(table).append(tr);
+    keys.forEach(function(key) {
+      data.status.forEach(function(value) {
+        if (value.name == key.key) {
+          var tr = document.createElement('tr');
+          var td = document.createElement('td');
+          $(td).html(key.label);
+          $(tr).append(td);
+          var td = document.createElement('td');
+          $(td).html(value.value+((value.unit != null) ? value.unit : ''));
+          $(td).css('text-align', 'right');
+          $(tr).append(td);
+          $(table).append(tr);
+        }
+      });
+    });
+    $('#status').append(table);
+
+  }).fail(function(data) {
+    $('#status').html('Error fetching data');
+  });
+});
+</script>
+</head>
+<body>
+<div id="status">
+</div>
+<hr>
+<font size="-2"><a href="https://github.com/alsmith/buderus" target="_blank">Source code</a></font>
+</body>
+</html>

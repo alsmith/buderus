@@ -1,7 +1,6 @@
 #!/usr/bin/python
 
 import os, sys
-import ast
 import buderus
 import cherrypy
 import datetime
@@ -20,9 +19,24 @@ class API():
     class Data():
         def __init__(self, api):
             self.api = api
-            self.GET = helpers.notImplemented
             self.PUT = helpers.notImplemented
             self.DELETE = helpers.notImplemented
+
+        @cherrypy.tools.json_out(handler=helpers.dumper)
+        def GET(self):
+            #(user, readonly) = helpers.authorisedUser()
+            #if not user:
+            #    raise cherrypy.HTTPError(403)
+
+            rc = {'status': []}
+            with helpers.DatabaseCursor() as cursor:
+                cursor.execute('SELECT * FROM buderusTimestamps, buderusKeys, buderusData WHERE timestampId = buderusTimestamps.id AND keyId = buderusKeys.id AND timestampId = (SELECT id FROM buderusTimestamps WHERE timestamp = (SELECT MAX(timestamp) FROM buderusTimestamps))')
+                for row in cursor:
+                    rc['timestamp'] = row['timestamp']
+                    rc['status'].append({'name': row['name'],
+                                         'value': row['numericValue'] if row['numericValue'] is not None else row['stringValue'],
+                                         'unit': row['unit']})
+            return rc
 
         @cherrypy.tools.json_in()
         @cherrypy.tools.json_out(handler=helpers.dumper)
@@ -37,7 +51,7 @@ class API():
                 m = re.match('\A(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})\Z', criteria['date'])
                 if not m:
                     raise cherrypy.HTTPError(400)
-                date = datetime.datetime(year=m.group('year'), month=m.group('month'), day=m.group('day'))
+                date = datetime.datetime(year=int(m.group('year')), month=int(m.group('month')), day=int(m.group('day')))
             else:
                 date = datetime.datetime.now()
 
@@ -55,32 +69,31 @@ class API():
             rc = {}
             with helpers.DatabaseCursor() as cursor:
                 if 'dayKeys' in criteria:
-                    cursor.execute('SELECT timestamp, name, value FROM buderusTimestamps, buderusKeys, buderusData WHERE DATE(timestamp) = DATE(%s) AND name IN %s AND buderusTimestamps.id = buderusData.timestampId AND buderusKeys.id = buderusData.keyId ORDER BY timestamp ASC', (date, criteria['dayKeys']))
+                    cursor.execute('SELECT timestamp, name, numericValue FROM buderusTimestamps, buderusKeys, buderusData WHERE timestampId >= (SELECT MIN(id) FROM buderusTimestamps WHERE DATE(timestamp) = DATE(%s)) AND timestampId <= (SELECT MAX(id) FROM buderusTimestamps WHERE DATE(timestamp) = DATE(%s)) AND timestampId IN (SELECT id FROM buderusTimestamps WHERE DATE(timestamp) = DATE(%s)) AND keyId IN (SELECT id FROM buderusKeys WHERE name IN %s) AND buderusTimestamps.id = buderusData.timestampId AND buderusKeys.id = buderusData.keyId ORDER BY timestamp ASC', (date, date, date, criteria['dayKeys']))
                     for row in cursor:
                         if row['name'] not in rc:
                             rc[row['name']] = []
-                        rc[row['name']].append([row['timestamp'], API.formatValue(row['value'])])
+                        rc[row['name']].append([row['timestamp'], API.formatValue(row['numericValue'])])
 
                 if 'yearKeys' in criteria:
-                    cursor.execute('SELECT DATE(timestamp) AS timestamp, name, MIN(value) AS min, MAX(value) AS max FROM buderusTimestamps, buderusKeys, buderusData WHERE YEAR(timestamp) = YEAR(%s) AND name IN %s AND buderusTimestamps.id = buderusData.timestampId AND buderusKeys.id = buderusData.keyId GROUP BY name, DATE(timestamp) ORDER BY name, DATE(timestamp) ASC', (date, criteria['yearKeys']))
-                    lastValue = None
+                    cursor.execute('SELECT * FROM buderusKeys,buderusRollup WHERE YEAR(date) = YEAR(%s) AND buderusKeys.id = buderusRollup.keyId AND buderusKeys.name IN %s', (date, criteria['yearKeys']))
                     for row in cursor:
                         minKey = '%s.min' % row['name']
                         maxKey = '%s.max' % row['name']
+                        sumKey = '%s.sum' % row['name']
                         deltaKey = '%s.delta' % row['name']
-                        for k in [minKey, maxKey, deltaKey]:
+                        for k in [minKey, maxKey, sumKey, deltaKey]:
                             if k not in rc:
                                 rc[k] = []
-                        minValue = API.formatValue(row['min'])
-                        maxValue = API.formatValue(row['max'])
-                        rc[minKey].append([row['timestamp'], minValue])
-                        rc[maxKey].append([row['timestamp'], maxValue])
-                        if lastValue:
-                            rc[deltaKey].append([row['timestamp'], maxValue-lastValue])
-                        lastValue = maxValue
+                        rc[minKey].append([row['date'], row['minValue']])
+                        rc[maxKey].append([row['date'], row['maxValue']])
+                        rc[sumKey].append([row['date'], row['sumValue']])
+                        rc[deltaKey].append([row['date'], row['maxValue']-row['minValue']])
 
             if skip != 1:
                 for series in rc.keys():
+                    if series.endswith(('.min', '.max', '.sum', '.delta')):
+                        continue
                     newSeries = []
                     count = 0
                     for dataPoint in rc[series]:
@@ -104,9 +117,14 @@ class API():
             return 100
         else:
             try:
-                return ast.literal_eval(value)
+                return float(value)
             except:
-                return value
+                pass
+            try:
+                return int(value)
+            except:
+                pass
+            return value
 
     @staticmethod
     def databaseParameters():
@@ -181,7 +199,28 @@ class API():
                 else:
                     keyId = keyName[0]['id']
 
-                cursor.execute('INSERT INTO buderusData (timestampId, keyId, value) VALUES(%s, %s, %s)', (timestampId, keyId, data['value']))
+                value = API.formatValue(data['value'])
+                if type(value) in (int, float):
+                    field = 'numericValue'
+                else:
+                    field = 'stringValue'
+                cursor.execute('INSERT INTO buderusData (timestampId, keyId, %s) VALUES(%%s, %%s, %%s)' % field, (timestampId, keyId, API.formatValue(data['value'])))
+
+            # Find missing dates...
+            cursor.execute('SELECT DISTINCT DATE(timestamp) AS date FROM buderusTimestamps WHERE DATE(timestamp) NOT IN (SELECT DISTINCT date FROM buderusRollup) ORDER BY DATE(timestamp) ASC')
+            dates = set(map(lambda row: row['date'], cursor.fetchall()))
+            dates.add(datetime.date.today())
+            # ...and populate the rollup table
+            for date in dates:
+                cursor.execute('SELECT id FROM buderusTimestamps WHERE DATE(timestamp) = %s', (date,))
+                timestampIDs = map(lambda row: row['id'], cursor.fetchall())
+                if timestampIDs:
+                    cursor.execute('DELETE FROM buderusRollup WHERE `date` = %s', (date,))
+                    cursor.execute('INSERT INTO buderusRollup (`date`, `keyId`, `minValue`, `maxValue`, `sumValue`) SELECT %s AS date, keyId, MIN(numericValue) AS `minValue`, MAX(numericValue) AS `maxValue`, MAX(numericValue)-MIN(numericValue) AS `deltaValue` FROM buderusKeys, buderusData WHERE timestampId IN %s AND buderusKeys.id = keyId AND buderusKeys.numeric GROUP BY keyId', (date, timestampIDs))
+
+                cursor.execute('SELECT COUNT(*) AS count FROM buderusData WHERE timestampId >= (SELECT MIN(id) FROM buderusTimestamps WHERE DATE(timestamp) = %s AND MINUTE(timestamp) > 10 AND MINUTE(timestamp) < 50) AND keyId = (SELECT id FROM buderusKeys WHERE name = %s)', (date, 'solarCircuits.sc1.solarYield'))
+                if cursor.fetchone()['count'] > 0:
+                    cursor.execute('UPDATE buderusRollup SET sumValue = (SELECT SUM(value) AS `sumValue` FROM (SELECT AVG(numericValue) AS value, HOUR(timestamp), DATE(timestamp) AS date FROM buderusTimestamps, buderusData WHERE DATE(timestamp) = %s AND keyId = (SELECT id FROM buderusKeys WHERE name = %s) AND MINUTE(timestamp) > 10 AND MINUTE(timestamp) < 50 AND buderusTimestamps.id = buderusData.timestampId GROUP BY DATE(timestamp),HOUR(timestamp)) Y) WHERE `keyId` = (SELECT id FROM buderusKeys WHERE name = %s) AND `date` = %s', (date, 'solarCircuits.sc1.solarYield', 'solarCircuits.sc1.solarYield', date))
 
 def main():
     parser = optparse.OptionParser(usage='usage: %s' % os.path.basename(__file__))

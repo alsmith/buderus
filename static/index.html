@@ -28,36 +28,36 @@ var systemTimer = null;
 var annualTimer = null;
 var graphInterval = 200;
 
-var solarTable1 =  [{key: 'dhwCircuits.dhw1.temperatureLevels.high',        label: 'Water setpoint',      unit: '&deg;C'},
-                    {key: 'solarCircuits.sc1.collectorTemperature',         label: 'Solar collector',     unit: '&deg;C'},
-                    {key: 'system.sensors.temperatures.hotWater_t2',        label: 'Upper tank (boiler)', unit: '&deg;C'},
-                    {key: 'solarCircuits.sc1.dhwTankTemperature',           label: 'Lower tank (solar)',  unit: '&deg;C'},
-                    {key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature', unit: '&deg;C'}];
+var solarTable1 =  [{key: 'dhwCircuits.dhw1.temperatureLevels.high',        label: 'Water setpoint',       unit: '&deg;C'},
+                    {key: 'solarCircuits.sc1.collectorTemperature',         label: 'Solar collector',      unit: '&deg;C'},
+                    {key: 'system.sensors.temperatures.hotWater_t2',        label: 'Upper tank (boiler)',  unit: '&deg;C'},
+                    {key: 'solarCircuits.sc1.dhwTankTemperature',           label: 'Lower tank (solar)',   unit: '&deg;C'},
+                    {key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature',  unit: '&deg;C'}];
 
-var solarTable2 =  [{key: 'solarCircuits.sc1.pumpModulation',               label: 'Solar pump output',   unit: '%',  gfactor: 100,  sfactor: 1},
-                    {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield',         unit: 'kW', gfactor: 1000, sfactor: 1000}];
+var solarTable2 =  [{key: 'solarCircuits.sc1.pumpModulation',               label: 'Solar pump output',    unit: '%',  gfactor: 100,  sfactor: 1},
+                    {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield',          unit: 'kW', gfactor: 1000, sfactor: 1000}];
 
-var heatingTable = [{key: 'system.sensors.temperatures.supply_t1',          label: 'Boiler output',       unit: '&deg;C'},
-                    {key: 'system.sensors.temperatures.return',             label: 'Boiler return',       unit: '&deg;C'},
-                    {key: 'heatingCircuits.hc1.actualSupplyTemperature',    label: 'Heating supply',      unit: '&deg;C'},
-                    {key: 'heatingCircuits.hc1.temperatureLevels.comfort2', label: 'Day setpoint',        unit: '&deg;C'},
-                    {key: 'heatingCircuits.hc1.temperatureLevels.eco',      label: 'Night setpoint',      unit: '&deg;C'},
-                    {key: 'heatingCircuits.hc1.roomtemperature',            label: 'Room temperature',    unit: '&deg;C'},
-                    {key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature', unit: '&deg;C'}];
+var heatingTable = [{key: 'system.sensors.temperatures.supply_t1',          label: 'Boiler output',        unit: '&deg;C'},
+                    {key: 'system.sensors.temperatures.return',             label: 'Boiler return',        unit: '&deg;C'},
+                    {key: 'heatingCircuits.hc1.actualSupplyTemperature',    label: 'Heating supply',       unit: '&deg;C'},
+                    {key: 'heatingCircuits.hc1.temperatureLevels.comfort2', label: 'Day setpoint',         unit: '&deg;C'},
+                    {key: 'heatingCircuits.hc1.temperatureLevels.eco',      label: 'Night setpoint',       unit: '&deg;C'},
+                    {key: 'heatingCircuits.hc1.roomtemperature',            label: 'Room temperature',     unit: '&deg;C'},
+                    {key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature',  unit: '&deg;C'}];
 
-var systemTable =  [{key: 'heatSources.actualPower',                        label: 'Total system output', unit: 'kW'},
-                    {key: 'heatSources.actualCHPower',                      label: 'Heating system',      unit: 'kW'},
-                    {key: 'heatSources.actualDHWPower',                     label: 'Hot water system',    unit: 'kW'},
-                    {key: 'heatSources.actualModulation',                   label: 'Flame modulation',    unit: '%'},
-                    {key: 'heatSources.flameStatus',                        label: 'Flame status',        unit: ''},
-                    {key: 'dhwCircuits.dhw1.waterFlow',                     label: 'Hot water flow',      unit: 'l/min'},
-                    {key: 'heatingCircuits.hc1.pumpModulation',             label: 'Boiler pump output', unit: '%'},
-                    {key: 'heatSources.CHpumpModulation',                   label: 'Radiator pump output', unit: '%'}];
+var systemTable =  [{key: 'heatSources.actualPower',                        label: 'Total system output',  unit: 'kW'},
+                    {key: 'heatSources.actualCHPower',                      label: 'Heating system',       unit: 'kW'},
+                    {key: 'heatSources.actualDHWPower',                     label: 'Hot water system',     unit: 'kW'},
+                    {key: 'heatSources.actualModulation',                   label: 'Flame modulation',     unit: '%'},
+                    {key: 'heatSources.flameStatus',                        label: 'Flame status',         unit: ''},
+                    {key: 'dhwCircuits.dhw1.waterFlow',                     label: 'Hot water flow',       unit: 'l/min'},
+                    {key: 'heatSources.CHpumpModulation',                   label: 'Boiler pump output',   unit: '%'},
+                    {key: 'heatingCircuits.hc1.pumpModulation',             label: 'Radiator pump output', unit: '%'}];
 
-var annualTable =  [{key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature', unit: '&deg;C', min: true, max: true},
-                    {key: 'heatSources.systemPressure',                     label: 'System pressure',     unit: 'bar',    min: true},
-                    {key: 'heatSources.numberOfStarts',                     label: 'Daily burner starts', unit: '',       delta: true},
-                    {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield',         unit: 'kWh',    sum: true, gfactor: 1000, sfactor: 1000}];
+var annualTable =  [{key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature',  unit: '&deg;C', min: true, max: true},
+                    {key: 'heatSources.systemPressure',                     label: 'System pressure',      unit: 'bar',    min: true},
+                    {key: 'heatSources.numberOfStarts',                     label: 'Daily burner starts',  unit: '',       delta: true},
+                    {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield',          unit: 'kWh',    sum: true, gfactor: 1000, sfactor: 1000}];
 
 function getAnchor() {
   if (window.location.hash != null && window.location.hash.length > 0) {

@@ -1,12 +1,15 @@
 #!/usr/bin/python
 
 import os, sys
+import argparse
 import buderus
 import cherrypy
 import datetime
+import io
 import json
-import optparse
+from PIL import Image
 import re
+import requests
 import socket
 import time
 
@@ -36,6 +39,12 @@ class API():
                     rc['status'].append({'name': row['name'],
                                          'value': row['numericValue'] if row['numericValue'] is not None else row['stringValue'],
                                          'unit': row['unit']})
+                cursor.execute('SELECT * FROM buderusKeys, buderusRollup WHERE keyId = buderusKeys.id AND date = (SELECT DATE(MAX(timestamp)) FROM buderusTimestamps)')
+                for row in cursor:
+                    for status in rc['status']:
+                        if status['name'] == row['name']:
+                            status['minValue'] = row['minValue']
+                            status['maxValue'] = row['maxValue']
             return rc
 
         @cherrypy.tools.json_in()
@@ -138,6 +147,67 @@ class API():
     def assignDatabaseParameters(threadIndex):
         cherrypy.thread_data.db = API.databaseParameters()
 
+    @staticmethod
+    def getRainfallPixel(img, x, y):
+        pixel = img.getpixel((x, y))
+        if pixel == (0,0,0,0):
+            mmh = 0
+        elif pixel == (155, 125, 150, 255):
+            mmh = 0.2
+        elif pixel == (0,0,255,255):
+            mmh = 1
+        elif pixel == (5, 140, 45, 255): 
+            mmh = 2
+        elif pixel == (5, 255, 5, 255):
+            mmh = 4
+        elif pixel == (255, 255, 0, 255):
+            mmh = 6
+        elif pixel == (255, 200, 0, 255):
+            mmh = 10
+        elif pixel == (255, 125, 0, 255):
+            mmh = 20
+        elif pixel == (255, 25, 0, 255):
+            mmh = 40
+        elif pixel == (175, 0, 220, 255):
+            mmh = 60
+        else:
+            mmh = pixel[0]*256*256+pixel[1]*256+pixel[2]
+        return mmh
+
+    @staticmethod
+    def getRainfall(node):
+        r = requests.get('http://www.meteoschweiz.admin.ch/home.html?tab=rain')
+        m = re.match('.*data-json-url="(?P<url>/product/output/radar/version__\d{8}_\d{4}/de/animation.json)".*', r.content, re.DOTALL)
+
+        r = requests.get('http://www.meteoschweiz.admin.ch%s' % m.group('url'))
+        animation = json.loads(r.text)
+        # These pixel values are for Switzerland, 4125-Riehen.
+        #
+        # If you also live in Switzerland then you'll have to work
+        # out our own pixel value based on the animation images
+        # received... if you don't live in Switzerland then
+        # you'll be better off turning the rainfall feature off
+        # altogether. Sorry about that!
+        x = 361
+        y = 209
+
+        for image in animation['radar_images'][0]['pictures']:
+            if image['data_type'] == 'measurement':
+                r = requests.get('http://www.meteoschweiz.admin.ch/%s' % image['url'], headers = {'Referer': 'http://www.meteoschweiz.admin.ch/home.html?tab=rain'})
+                with io.BytesIO(r.content) as png:
+                    with Image.open(png) as img:
+                        mmh = API.getRainfallPixel(img, x, y)
+                        mmh += API.getRainfallPixel(img, x+1, y)*0.5
+                        mmh += API.getRainfallPixel(img, x, y+1)*0.5
+                        mmh += API.getRainfallPixel(img, x-1, y)*0.5
+                        mmh += API.getRainfallPixel(img, x, y-1)*0.5
+                        mmh += API.getRainfallPixel(img, x+1, y+1)*0.25
+                        mmh += API.getRainfallPixel(img, x+1, y-1)*0.25
+                        mmh += API.getRainfallPixel(img, x-1, y+1)*0.25
+                        mmh += API.getRainfallPixel(img, x-1, y-1)*0.25
+                        mmh /= 4
+        return json.dumps({'id': node, 'unitOfMeasure': 'mm/h', 'value': mmh})
+
     def queryBoiler(self):
         nodes = [ '/system/sensors/temperatures/outdoor_t1',
                   '/system/sensors/temperatures/supply_t1',
@@ -168,7 +238,6 @@ class API():
                   '/heatingCircuits/hc1/fastHeatupFactor',
 
                   '/dhwCircuits/dhw1/actualTemp',
-                  '/dhwCircuits/dhw1/waterFlow',
                   '/dhwCircuits/dhw1/workingTime',
                   '/dhwCircuits/dhw1/temperatureLevels/high',
 
@@ -177,6 +246,9 @@ class API():
                   '/solarCircuits/sc1/pumpModulation',
                   '/solarCircuits/sc1/collectorTemperature',
                   '/solarCircuits/sc1/actuatorStatus',
+
+                  # XXX/ajs need to make this configurable in config.ini
+                  '/rainfall', # Remove if not required.
                 ]
 
         with helpers.DatabaseCursor(maxErrors=None) as cursor:
@@ -186,24 +258,32 @@ class API():
             cursor.execute('SELECT * FROM buderusKeys')
             keyNames = cursor.fetchall()
             for node in nodes:
-                jsonText = self.buderus.get_data(node)
+                if node == '/rainfall':
+                    jsonText = API.getRainfall(node)
+                else:
+                    jsonText = self.buderus.get_data(node)
                 if not jsonText:
                     continue
                 data = json.loads(jsonText)
                 data['id'] = data['id'].lstrip('/').replace('/', '.')
-
-                keyName = filter(lambda k: k['name'] == data['id'], keyNames)
-                if len(keyName) == 0:
-                    cursor.execute('INSERT INTO buderusKeys (name, unit) VALUES(%s, %s)', (data['id'], data.get('unitOfMeasure')))
-                    keyId = cursor.lastrowid()
-                else:
-                    keyId = keyName[0]['id']
 
                 value = API.formatValue(data['value'])
                 if type(value) in (int, float):
                     field = 'numericValue'
                 else:
                     field = 'stringValue'
+
+                keyName = filter(lambda k: k['name'] == data['id'], keyNames)
+                if len(keyName) == 0:
+                    cursor.execute('INSERT INTO buderusKeys (name, `numeric`, unit) VALUES(%s, %s, %s)', (data['id'], field == 'numericValue', data.get('unitOfMeasure')))
+                    keyId = cursor.lastrowid()
+                else:
+                    keyId = keyName[0]['id']
+
+                # Sometimes this key reports as zero... ignore such values
+                if data['id'] == 'heatSources.numberOfStarts' and value == 0:
+                    continue
+
                 cursor.execute('INSERT INTO buderusData (timestampId, keyId, %s) VALUES(%%s, %%s, %%s)' % field, (timestampId, keyId, API.formatValue(data['value'])))
 
             # Find missing dates...
@@ -223,21 +303,21 @@ class API():
                     cursor.execute('UPDATE buderusRollup SET sumValue = (SELECT SUM(value) AS `sumValue` FROM (SELECT AVG(numericValue) AS value, HOUR(timestamp), DATE(timestamp) AS date FROM buderusTimestamps, buderusData WHERE DATE(timestamp) = %s AND keyId = (SELECT id FROM buderusKeys WHERE name = %s) AND MINUTE(timestamp) > 10 AND MINUTE(timestamp) < 50 AND buderusTimestamps.id = buderusData.timestampId GROUP BY DATE(timestamp),HOUR(timestamp)) Y) WHERE `keyId` = (SELECT id FROM buderusKeys WHERE name = %s) AND `date` = %s', (date, 'solarCircuits.sc1.solarYield', 'solarCircuits.sc1.solarYield', date))
 
 def main():
-    parser = optparse.OptionParser(usage='usage: %s' % os.path.basename(__file__))
+    parser = argparse.ArgumentParser(usage='usage: %s' % os.path.basename(__file__))
 
-    parser.add_option('--foreground', action='store_true', help='Don\'t daemonize')
-    parser.add_option('--config', default=os.path.join(os.path.dirname(__file__), 'config.ini'), help='Path to config.ini')
-    (opts, args) = parser.parse_args()
+    parser.add_argument('--foreground', action='store_true', help='Don\'t daemonize')
+    parser.add_argument('--config', default=os.path.join(os.path.dirname(__file__), 'config.ini'), help='Path to config.ini')
+    args = parser.parse_args()
 
-    if not opts.config:
+    if not args.config:
         print 'config.ini file not specified'
         return 1
 
-    if not opts.foreground:
+    if not args.foreground:
         cherrypy.process.plugins.Daemonizer(cherrypy.engine).subscribe()
 
     os.chdir(os.path.dirname(__file__))
-    cherrypy.config.update(opts.config)
+    cherrypy.config.update(args.config)
     for log in ['access_file', 'error_file', 'pid_file']:
         path = cherrypy.config.get('log.%s' % log)
         if not path.startswith('/'):

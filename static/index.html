@@ -7,13 +7,15 @@
 <script type="text/javascript" src="jquery.jqplot.min.js"></script>
 <script type="text/javascript" src="plugins/jqplot.dateAxisRenderer.js"></script>
 <script type="text/javascript" src="plugins/jqplot.pointLabels.js"></script>
+<script type="text/javascript" src="plugins/jqplot.cursor.js"></script>
 <link rel="stylesheet" type="text/css" href="jquery.jqplot.min.css">
 <script>
 var solarTemps = null;
 var solarData = null;
 var heatingTemps = null;
 var systemData = null;
-var annualData = null;
+var annualData1 = null;
+var annualData2 = null;
 
 var data = null;
 var offset = 0;
@@ -25,20 +27,22 @@ var solarTimer1 = null;
 var solarTimer2 = null;
 var heatingTimer = null;
 var systemTimer = null;
-var annualTimer = null;
+var annualTimer1 = null;
+var annualTimer2 = null;
 var graphInterval = 200;
 
 var solarTable1 =  [{key: 'dhwCircuits.dhw1.temperatureLevels.high',        label: 'Water setpoint',       unit: '&deg;C'},
                     {key: 'solarCircuits.sc1.collectorTemperature',         label: 'Solar collector',      unit: '&deg;C'},
                     {key: 'system.sensors.temperatures.hotWater_t2',        label: 'Upper tank (boiler)',  unit: '&deg;C'},
                     {key: 'solarCircuits.sc1.dhwTankTemperature',           label: 'Lower tank (solar)',   unit: '&deg;C'},
-                    {key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature',  unit: '&deg;C'}];
+                    {key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature',  unit: '&deg;C'},
+                    {key: 'rainfall',                                       label: 'Rainfall',             unit: 'mm/h'}];
 
 var solarTable2 =  [{key: 'solarCircuits.sc1.pumpModulation',               label: 'Solar pump output',    unit: '%',  gfactor: 100,  sfactor: 1},
                     {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield',          unit: 'kW', gfactor: 1000, sfactor: 1000}];
 
-var heatingTable = [{key: 'system.sensors.temperatures.supply_t1',          label: 'Boiler output',        unit: '&deg;C'},
-                    {key: 'system.sensors.temperatures.return',             label: 'Boiler return',        unit: '&deg;C'},
+var heatingTable = [{key: 'system.sensors.temperatures.supply_t1',          label: 'System output',        unit: '&deg;C'},
+                    {key: 'system.sensors.temperatures.return',             label: 'System return',        unit: '&deg;C'},
                     {key: 'heatingCircuits.hc1.actualSupplyTemperature',    label: 'Heating supply',       unit: '&deg;C'},
                     {key: 'heatingCircuits.hc1.temperatureLevels.comfort2', label: 'Day setpoint',         unit: '&deg;C'},
                     {key: 'heatingCircuits.hc1.temperatureLevels.eco',      label: 'Night setpoint',       unit: '&deg;C'},
@@ -50,14 +54,16 @@ var systemTable =  [{key: 'heatSources.actualPower',                        labe
                     {key: 'heatSources.actualDHWPower',                     label: 'Hot water system',     unit: 'kW'},
                     {key: 'heatSources.actualModulation',                   label: 'Flame modulation',     unit: '%'},
                     {key: 'heatSources.flameStatus',                        label: 'Flame status',         unit: ''},
-                    {key: 'dhwCircuits.dhw1.waterFlow',                     label: 'Hot water flow',       unit: 'l/min'},
-                    {key: 'heatSources.CHpumpModulation',                   label: 'Boiler pump output',   unit: '%'},
+                    {key: 'heatSources.CHpumpModulation',                   label: 'System pump output',   unit: '%'},
                     {key: 'heatingCircuits.hc1.pumpModulation',             label: 'Radiator pump output', unit: '%'}];
 
-var annualTable =  [{key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature',  unit: '&deg;C', min: true, max: true},
-                    {key: 'heatSources.systemPressure',                     label: 'System pressure',      unit: 'bar',    min: true},
-                    {key: 'heatSources.numberOfStarts',                     label: 'Daily burner starts',  unit: '',       delta: true},
-                    {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield',          unit: 'kWh',    sum: true, gfactor: 1000, sfactor: 1000}];
+var annualTable1 = [{key: 'system.sensors.temperatures.outdoor_t1',         label: 'Outside temperature',  unit: '&deg;C', min: true,  max: true},
+                    {key: 'rainfall',                                       label: 'Rainfall',             unit: 'mm/h',   min: false, max: true},
+                    {key: 'solarCircuits.sc1.collectorTemperature',         label: 'Solar collector',      unit: '&deg;C', min: true,  max: true},
+                    {key: 'solarCircuits.sc1.solarYield',                   label: 'Solar yield',          unit: 'kWh',    sum: true,  gfactor: 1000, sfactor: 1000}];
+
+var annualTable2 = [{key: 'heatSources.numberOfStarts',                     label: 'Daily burner starts',  unit: '',       delta: true},
+                    {key: 'heatSources.systemPressure',                     label: 'System pressure',      unit: 'bar',    min: true}];
 
 function getAnchor() {
   if (window.location.hash != null && window.location.hash.length > 0) {
@@ -92,9 +98,13 @@ function clearData(text) {
     systemData.destroy();
     systemData = null;
   }
-  if (annualData != null) {
-    annualData.destroy();
-    annualData = null;
+  if (annualData1 != null) {
+    annualData1.destroy();
+    annualData1 = null;
+  }
+  if (annualData2 != null) {
+    annualData2.destroy();
+    annualData2 = null;
   }
   $('#date').html('');
   $('#status').html(text);
@@ -203,6 +213,9 @@ function displaySolarData1() {
   if (data['dhwCircuits.dhw1.temperatureLevels.high'] == null) {
     data['dhwCircuits.dhw1.temperatureLevels.high'] = [[]];
   }
+  if (data['rainfall'] == null) {
+    data['rainfall'] = [[]];
+  }
 
   if (solarTemps != null) {
     solarTemps.destroy();
@@ -223,6 +236,13 @@ function displaySolarData1() {
       xaxis: {
         renderer: $.jqplot.DateAxisRenderer
       },
+    },
+    cursor: {
+      show: true,
+      followMouse: true, 
+      zoom: true,
+      clickReset: true,
+      dblClickReset: false
     },
   });
   solarTimer2 = setInterval(displaySolarData2, graphInterval);
@@ -253,6 +273,13 @@ function displaySolarData2() {
         min: 0
       },
     },
+    cursor: {
+      show: true,
+      followMouse: true, 
+      zoom: true,
+      clickReset: true,
+      dblClickReset: false
+    },
   });
   heatingTimer = setInterval(displayHeatingData, graphInterval);
 }
@@ -279,6 +306,13 @@ function displayHeatingData() {
       xaxis: {
         renderer: $.jqplot.DateAxisRenderer
       },
+    },
+    cursor: {
+      show: true,
+      followMouse: true, 
+      zoom: true,
+      clickReset: true,
+      dblClickReset: false
     },
   });
   systemTimer = setInterval(displaySystemData, graphInterval);
@@ -307,20 +341,31 @@ function displaySystemData() {
         renderer: $.jqplot.DateAxisRenderer
       },
       yaxis: {
-        min: 0
+        min: 0,
+        max: 100
       },
     },
+    cursor: {
+      show: true,
+      followMouse: true, 
+      zoom: true,
+      clickReset: true,
+      dblClickReset: false
+    },
   });
-  annualTimer = setInterval(displayAnnualData, graphInterval);
+  annualTimer1 = setInterval(displayAnnualData1, graphInterval);
 }
 
-function displayAnnualData() {
+function displayAnnualData1() {
   clearTimers();
-  if (annualData != null) {
-    annualData.destroy();
-    annualData = null;
+  if (data['rainfall'] == null) {
+    data['rainfall'] = [[]];
   }
-  annualData = $.jqplot('annualData', getData(annualTable, data), {
+  if (annualData1 != null) {
+    annualData1.destroy();
+    annualData1 = null;
+  }
+  annualData1 = $.jqplot('annualData1', getData(annualTable1, data), {
     title: 'Annual Summary',
     width: 800,
     seriesDefaults: { 
@@ -330,7 +375,42 @@ function displayAnnualData() {
       show: true,
       placement: 'outside'
     },
-    series: getLabels(annualTable, data),
+    series: getLabels(annualTable1, data),
+    axes: {
+      xaxis: {
+        renderer: $.jqplot.DateAxisRenderer
+      },
+      yaxis: {
+        max: 80
+      },
+    },
+    cursor: {
+      show: true,
+      followMouse: true, 
+      zoom: true,
+      clickReset: true,
+      dblClickReset: false
+    },
+  });
+  annualTimer2 = setInterval(displayAnnualData2, graphInterval);
+}
+
+function displayAnnualData2() {
+  clearTimers();
+  if (annualData2 != null) {
+    annualData2.destroy();
+    annualData2 = null;
+  }
+  annualData2 = $.jqplot('annualData2', getData(annualTable2, data), {
+    width: 800,
+    seriesDefaults: { 
+      showMarker: false,
+    },
+    legend: {
+      show: true,
+      placement: 'outside'
+    },
+    series: getLabels(annualTable2, data),
     axes: {
       xaxis: {
         renderer: $.jqplot.DateAxisRenderer
@@ -338,6 +418,13 @@ function displayAnnualData() {
       yaxis: {
         min: 0
       },
+    },
+    cursor: {
+      show: true,
+      followMouse: true, 
+      zoom: true,
+      clickReset: true,
+      dblClickReset: false
     },
   });
   if (offset == 0) {
@@ -358,7 +445,8 @@ function clearTimers() {
   solarTimer2 = clearTimer(solarTimer2);
   heatingTimer = clearTimer(heatingTimer);
   systemTimer = clearTimer(systemTimer);
-  annualTimer = clearTimer(annualTimer);
+  annualTimer1 = clearTimer(annualTimer1);
+  annualTimer2 = clearTimer(annualTimer2);
 }
 
 function displayData() {
@@ -377,7 +465,7 @@ function displayData() {
   postData.dayKeys = postData.dayKeys.concat(getKeys(systemTable));
 
   postData.yearKeys = [];
-  postData.yearKeys = postData.yearKeys.concat(getKeys(annualTable));
+  postData.yearKeys = postData.yearKeys.concat(getKeys(annualTable1).concat(getKeys(annualTable2)));
 
   $.ajax({
     dataType: 'json',
@@ -407,7 +495,7 @@ function displayData() {
     solarTimer1 = setInterval(displaySolarData1, graphInterval);
   }).fail(function(jqXHR, textStatus, errorThrown) {
     console.log(jqXHR.status);
-    clearData('Error fetching data');
+    clearData('Error fetching data ('+jqXHR.status+')');
     refreshTimer = setInterval(displayData, 1000);
   });
 }
@@ -479,7 +567,8 @@ $(document).ready(function(){
 <tr><td><div id="solarData"></td></tr>
 <tr><td><div id="heatingTemps"></td></tr>
 <tr><td><div id="systemData"></td></tr>
-<tr><td><div id="annualData"></td></tr>
+<tr><td><div id="annualData1"></td></tr>
+<tr><td><div id="annualData2"></td></tr>
 </table>
 <hr>
 <font size="-2"><a href="https://github.com/alsmith/buderus" target="_blank">Source code</a></font>

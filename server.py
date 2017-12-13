@@ -78,11 +78,19 @@ class API():
             rc = {}
             with helpers.DatabaseCursor() as cursor:
                 if 'dayKeys' in criteria:
-                    cursor.execute('SELECT timestamp, name, numericValue FROM buderusTimestamps, buderusKeys, buderusData WHERE timestampId >= (SELECT MIN(id) FROM buderusTimestamps WHERE DATE(timestamp) = DATE(%s)) AND timestampId <= (SELECT MAX(id) FROM buderusTimestamps WHERE DATE(timestamp) = DATE(%s)) AND timestampId IN (SELECT id FROM buderusTimestamps WHERE DATE(timestamp) = DATE(%s)) AND keyId IN (SELECT id FROM buderusKeys WHERE name IN %s) AND buderusTimestamps.id = buderusData.timestampId AND buderusKeys.id = buderusData.keyId ORDER BY timestamp ASC', (date, date, date, criteria['dayKeys']))
+                    dbKeys = {}
+                    cursor.execute('SELECT * FROM buderusKeys')
                     for row in cursor:
-                        if row['name'] not in rc:
-                            rc[row['name']] = []
-                        rc[row['name']].append([row['timestamp'], API.formatValue(row['numericValue'])])
+                        dbKeys[row['id']] = row['name']
+
+                    cursor.execute('SELECT timestamp, keyId, numericValue FROM buderusTimestamps, buderusData WHERE timestampId IN (SELECT id FROM buderusTimestamps WHERE DATE(timestamp) = DATE(%s)) AND buderusTimestamps.id = buderusData.timestampId ORDER BY timestamp ASC', (date,))
+                    for row in cursor:
+                        keyName = dbKeys[row['keyId']]
+                        if keyName not in criteria['dayKeys']:
+                            continue
+                        if keyName not in rc:
+                            rc[keyName] = []
+                        rc[keyName].append([row['timestamp'], API.formatValue(row['numericValue'])])
 
                 if 'yearKeys' in criteria:
                     cursor.execute('SELECT * FROM buderusKeys,buderusRollup WHERE YEAR(date) = YEAR(%s) AND buderusKeys.id = buderusRollup.keyId AND buderusKeys.name IN %s', (date, criteria['yearKeys']))
@@ -209,11 +217,13 @@ class API():
         return json.dumps({'id': node, 'unitOfMeasure': 'mm/h', 'value': mmh})
 
     def queryBoiler(self):
-        nodes = [ '/system/sensors/temperatures/outdoor_t1',
+        nodes = [ '/gateway/versionFirmware',
+                  '/system/sensors/temperatures/outdoor_t1',
                   '/system/sensors/temperatures/supply_t1',
                   '/system/sensors/temperatures/return',
                   '/system/sensors/temperatures/hotWater_t2',
                   '/system/sensors/temperatures/switch',
+                  '/system/appliance/nominalBurnerLoad',
 
                   '/heatSources/actualPower',
                   '/heatSources/actualCHPower',
@@ -227,6 +237,7 @@ class API():
                   '/heatSources/workingTime/totalSystem',
                   '/heatSources/workingTime/secondBurner',
                   '/heatSources/workingTime/centralHeating',
+                  '/heatSources/supplyTemperatureSetpoint',
 
                   '/heatingCircuits/hc1/actualSupplyTemperature',
                   '/heatingCircuits/hc1/operationMode',
@@ -285,6 +296,15 @@ class API():
                     continue
 
                 cursor.execute('INSERT INTO buderusData (timestampId, keyId, %s) VALUES(%%s, %%s, %%s)' % field, (timestampId, keyId, API.formatValue(data['value'])))
+
+            # Compute potentially missing burner data...
+            cursor.execute('SELECT buderusData.id,name,numericValue FROM buderusData,buderusKeys WHERE timestampId = %s AND buderusData.keyId = buderusKeys.id AND `numeric` = 1', (timestampId,))
+            datapoints = {}
+            for row in cursor:
+                datapoints[row['name']] = {'id': row['id'], 'value': row['numericValue']}
+            if datapoints['heatSources.actualPower']['value'] == 0:
+                actualPower = datapoints['system.appliance.nominalBurnerLoad']['value'] * datapoints['heatSources.actualModulation']['value'] / 100
+                cursor.execute('UPDATE buderusData SET numericValue = %s WHERE id = %s', (actualPower, datapoints['heatSources.actualPower']['id']))
 
             # Find missing dates...
             cursor.execute('SELECT DISTINCT DATE(timestamp) AS date FROM buderusTimestamps WHERE DATE(timestamp) NOT IN (SELECT DISTINCT date FROM buderusRollup) ORDER BY DATE(timestamp) ASC')

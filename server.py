@@ -216,6 +216,12 @@ class API():
                         mmh /= 4
         return json.dumps({'id': node, 'unitOfMeasure': 'mm/h', 'value': mmh})
 
+    @staticmethod
+    def updateSolarYield(cursor, date):
+        cursor.execute('SELECT COUNT(*) AS count FROM buderusData WHERE timestampId >= (SELECT MIN(id) FROM buderusTimestamps WHERE DATE(timestamp) = %s AND MINUTE(timestamp) > 10 AND MINUTE(timestamp) < 50) AND keyId = (SELECT id FROM buderusKeys WHERE name = %s)', (date, 'solarCircuits.sc1.solarYield'))
+        if cursor.fetchone()['count'] > 0:
+            cursor.execute('UPDATE buderusRollup SET sumValue = (SELECT SUM(value) AS `sumValue` FROM (SELECT AVG(numericValue) AS value, HOUR(timestamp), DATE(timestamp) AS date FROM buderusTimestamps, buderusData WHERE DATE(timestamp) = %s AND keyId = (SELECT id FROM buderusKeys WHERE name = %s) AND MINUTE(timestamp) > 10 AND MINUTE(timestamp) < 50 AND buderusTimestamps.id = buderusData.timestampId GROUP BY DATE(timestamp),HOUR(timestamp)) Y) WHERE `keyId` = (SELECT id FROM buderusKeys WHERE name = %s) AND `date` = %s', (date, 'solarCircuits.sc1.solarYield', 'solarCircuits.sc1.solarYield', date))
+
     def queryBoiler(self):
         nodes = [ '/gateway/versionFirmware',
                   '/system/sensors/temperatures/outdoor_t1',
@@ -302,25 +308,37 @@ class API():
             datapoints = {}
             for row in cursor:
                 datapoints[row['name']] = {'id': row['id'], 'value': row['numericValue']}
-            if datapoints['heatSources.actualPower']['value'] == 0:
-                actualPower = datapoints['system.appliance.nominalBurnerLoad']['value'] * datapoints['heatSources.actualModulation']['value'] / 100
-                cursor.execute('UPDATE buderusData SET numericValue = %s WHERE id = %s', (actualPower, datapoints['heatSources.actualPower']['id']))
+            if datapoints['heatSources.actualPower']['value'] == 0 and datapoints['heatSources.actualModulation']['value'] != 0:
+                datapoints['heatSources.actualPower']['value'] = datapoints['system.appliance.nominalBurnerLoad']['value'] * datapoints['heatSources.actualModulation']['value'] / 100
+                cursor.execute('UPDATE buderusData SET numericValue = %s WHERE id = %s', (datapoints['heatSources.actualPower']['value'], datapoints['heatSources.actualPower']['id']))
 
             # Find missing dates...
             cursor.execute('SELECT DISTINCT DATE(timestamp) AS date FROM buderusTimestamps WHERE DATE(timestamp) NOT IN (SELECT DISTINCT date FROM buderusRollup) ORDER BY DATE(timestamp) ASC')
             dates = set(map(lambda row: row['date'], cursor.fetchall()))
-            dates.add(datetime.date.today())
-            # ...and populate the rollup table
+
+            # ...and populate the rollup table with any missing days' data.
             for date in dates:
                 cursor.execute('SELECT id FROM buderusTimestamps WHERE DATE(timestamp) = %s', (date,))
                 timestampIDs = map(lambda row: row['id'], cursor.fetchall())
                 if timestampIDs:
                     cursor.execute('DELETE FROM buderusRollup WHERE `date` = %s', (date,))
-                    cursor.execute('INSERT INTO buderusRollup (`date`, `keyId`, `minValue`, `maxValue`, `sumValue`) SELECT %s AS date, keyId, MIN(numericValue) AS `minValue`, MAX(numericValue) AS `maxValue`, MAX(numericValue)-MIN(numericValue) AS `deltaValue` FROM buderusKeys, buderusData WHERE timestampId IN %s AND buderusKeys.id = keyId AND buderusKeys.numeric GROUP BY keyId', (date, timestampIDs))
+                    cursor.execute('INSERT INTO buderusRollup (`date`, `keyId`, `minValue`, `maxValue`, `sumValue`) SELECT %s AS date, keyId, MIN(numericValue) AS `minValue`, MAX(numericValue) AS `maxValue`, 0 as `sumValue` FROM buderusKeys, buderusData WHERE timestampId IN %s AND buderusKeys.id = keyId AND buderusKeys.numeric GROUP BY keyId', (date, timestampIDs))
 
-                cursor.execute('SELECT COUNT(*) AS count FROM buderusData WHERE timestampId >= (SELECT MIN(id) FROM buderusTimestamps WHERE DATE(timestamp) = %s AND MINUTE(timestamp) > 10 AND MINUTE(timestamp) < 50) AND keyId = (SELECT id FROM buderusKeys WHERE name = %s)', (date, 'solarCircuits.sc1.solarYield'))
-                if cursor.fetchone()['count'] > 0:
-                    cursor.execute('UPDATE buderusRollup SET sumValue = (SELECT SUM(value) AS `sumValue` FROM (SELECT AVG(numericValue) AS value, HOUR(timestamp), DATE(timestamp) AS date FROM buderusTimestamps, buderusData WHERE DATE(timestamp) = %s AND keyId = (SELECT id FROM buderusKeys WHERE name = %s) AND MINUTE(timestamp) > 10 AND MINUTE(timestamp) < 50 AND buderusTimestamps.id = buderusData.timestampId GROUP BY DATE(timestamp),HOUR(timestamp)) Y) WHERE `keyId` = (SELECT id FROM buderusKeys WHERE name = %s) AND `date` = %s', (date, 'solarCircuits.sc1.solarYield', 'solarCircuits.sc1.solarYield', date))
+                self.updateSolarYield(cursor, date)
+
+            # Now update today's data in a less expensive fashion.
+            cursor.execute('SELECT `buderusRollup`.`id`, `name`, `minValue`, `maxValue` FROM buderusKeys,buderusRollup WHERE keyId = buderusKeys.id AND `date` = (SELECT DATE(timestamp) FROM buderusTimestamps WHERE id = %s)', (timestampId,))
+            if cursor.rowcount() == 0:
+                # Ought to never happen, as a missing day will have been identified in
+                # the loop above and initial data inserted.
+                cursor.execute('INSERT INTO buderusRollup (`date`, `keyId`, `minValue`, `maxValue`, `sumValue`) SELECT (SELECT date(timestamp) FROM buderusTimestamps WHERE id = %s) AS date, keyId, numericValue AS `minValue`, numericValue AS `maxValue`, 0 AS `sumValue` FROM buderusKeys, buderusData WHERE timestampId = %s AND buderusKeys.id = keyId AND buderusKeys.numeric', (timestampId, timestampId))
+            else:
+                rollups = cursor.fetchall()
+                for rollup in rollups:
+                    currentValue = datapoints[rollup['name']]['value']
+                    cursor.execute('UPDATE buderusRollup SET `minValue` = LEAST(%s,%s),`maxValue` = GREATEST(%s,%s) WHERE id = %s', (currentValue, rollup['minValue'], currentValue, rollup['maxValue'], rollup['id'],))
+
+            self.updateSolarYield(cursor, datetime.date.today())
 
 def main():
     parser = argparse.ArgumentParser(usage='usage: %s' % os.path.basename(__file__))
